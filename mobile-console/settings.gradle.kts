@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "7xConsole"
+rootProject.name = "AndroConsole"
 include(":app")
