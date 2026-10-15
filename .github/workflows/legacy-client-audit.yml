@@ -31,13 +31,13 @@ jobs:
           test -d src/InOut
 
           python3 - <<'PY'
+          import os
           import pathlib
           import re
           import sys
           import xml.etree.ElementTree as ET
 
-          root = pathlib.Path(".")
-          project = root / "src/Androrat"
+          project = pathlib.Path("src/Androrat")
           manifest_path = project / "AndroidManifest.xml"
           ns = {"android": "http://schemas.android.com/apk/res/android"}
 
@@ -57,9 +57,9 @@ jobs:
           java_files = list((project / "src").rglob("*.java"))
           java_sources = {}
           for path in java_files:
-              text = path.read_text(encoding="utf-8", errors="replace")
-              package_match = re.search(r"^\s*package\s+([\w.]+)\s*;", text, re.M)
-              class_match = re.search(r"\b(?:class|interface|enum)\s+(\w+)", text)
+              source = path.read_text(encoding="utf-8", errors="replace")
+              package_match = re.search(r"^\s*package\s+([\w.]+)\s*;", source, re.M)
+              class_match = re.search(r"\b(?:class|interface|enum)\s+(\w+)", source)
               if package_match and class_match:
                   java_sources[f"{package_match.group(1)}.{class_match.group(1)}"] = path
 
@@ -81,17 +81,18 @@ jobs:
                           f"under src/Androrat/src (resolved as {fqcn})"
                       )
 
+          manifest_text = manifest_path.read_text(encoding="utf-8")
           resource_text = "\n".join(
-              p.read_text(encoding="utf-8", errors="replace")
-              for p in (project / "res").rglob("*")
-              if p.is_file() and p.suffix in {".xml", ".txt"}
+              path.read_text(encoding="utf-8", errors="replace")
+              for path in (project / "res").rglob("*")
+              if path.is_file() and path.suffix in {".xml", ".txt"}
           )
-          for ref in re.findall(r"@(?:string|drawable|layout|xml)/([A-Za-z0-9_]+)", manifest_path.read_text(encoding="utf-8")):
-              if not re.search(rf'name=["\\']{re.escape(ref)}["\\']', resource_text):
-                  # Drawable resources may be binary files and are verified separately below.
-                  drawable_found = any((project / "res").rglob(ref + ".*"))
-                  if not drawable_found:
-                      warnings.append(f"Manifest resource reference @{ref} was not found in resource XML or files")
+          resource_files = [path for path in (project / "res").rglob("*") if path.is_file()]
+          for ref in re.findall(r"@(?:string|drawable|layout|xml)/([A-Za-z0-9_]+)", manifest_text):
+              defined_in_xml = f'name="{ref}"' in resource_text or f"name='{ref}'" in resource_text
+              defined_as_file = any(path.stem == ref for path in resource_files)
+              if not defined_in_xml and not defined_as_file:
+                  warnings.append(f"Manifest resource reference @{ref} was not found in resource XML or files")
 
           print(f"Java source files discovered: {len(java_files)}")
           print("Shared protocol source directory: present")
@@ -99,7 +100,7 @@ jobs:
           for warning in warnings:
               print(f"::warning file={manifest_path}::{warning}")
 
-          gradle_files = [
+          build_files = [
               project / "build.gradle",
               project / "build.gradle.kts",
               project / "settings.gradle",
@@ -107,13 +108,13 @@ jobs:
               project / "gradlew",
               project / "build.xml",
           ]
-          existing = [str(p) for p in gradle_files if p.exists()]
+          existing = [str(path) for path in build_files if path.exists()]
           if existing:
               print("Build configuration files found: " + ", ".join(existing))
           else:
               print("::notice file=src/Androrat/project.properties::No Gradle wrapper/build files or Ant build.xml found; this legacy Eclipse/ADT project is not yet wired to an APK build job.")
 
-          with open(__import__("os").environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
               summary.write("## Legacy Android client audit\n\n")
               summary.write("- Manifest XML parses successfully.\n")
               summary.write(f"- Package: `{package_name}`.\n")
